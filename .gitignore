@@ -1,0 +1,49 @@
+# Build output
+bin/
+obj/
+
+# User-specific files
+*.user
+*.suo
+*.userprefs
+*.rsuser
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Test results
+[Tt]est[Rr]esult*/
+*.coverage
+*.coveragexml
+
+# Local secrets / overrides
+appsettings.Local.json
+appsettings.*.local.json
+
+# Node (client/)
+node_modules/
+dist/
+build/
+.cache/
+.env
+.env.local
+.env.*.local
+
+# Playwright artifacts (client/)
+test-results/
+playwright-report/
+playwright/.cache/
+
+# OS
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Logs
+*.log
+logs/

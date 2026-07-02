@@ -1,0 +1,13 @@
+**/bin/
+**/obj/
+**/node_modules/
+**/dist/
+.git/
+.github/
+.vs/
+.vscode/
+.idea/
+docs/
+*.md
+**/appsettings.Local.json
+**/appsettings.*.local.json

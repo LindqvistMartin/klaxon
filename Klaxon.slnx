@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Klaxon.Api/Klaxon.Api.csproj" />
+    <Project Path="src/Klaxon.Core/Klaxon.Core.csproj" />
+    <Project Path="src/Klaxon.Infrastructure/Klaxon.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Klaxon.Tests.Unit/Klaxon.Tests.Unit.csproj" />
+  </Folder>
+</Solution>

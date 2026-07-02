@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Klaxon.Core\Klaxon.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Klaxon.Tests.Integration" />
+    <InternalsVisibleTo Include="Klaxon.Tests.Unit" />
+  </ItemGroup>
+
+</Project>
