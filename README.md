@@ -52,8 +52,9 @@ dotnet build
 dotnet test
 ```
 
-Requires the .NET 10 SDK. A Postgres connection string (`ConnectionStrings:Postgres`)
-is needed to run the API; the integration tests provision their own via Testcontainers.
+Requires the .NET 10 SDK. The unit tests need no services. A Postgres connection string
+(`ConnectionStrings:Postgres`) is needed to run the API; integration tests, as they land,
+spin up their own Postgres via Testcontainers.
 
 ## Roadmap
 

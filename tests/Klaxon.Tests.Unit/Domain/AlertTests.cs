@@ -31,4 +31,11 @@ public sealed class AlertTests
         var act = () => new Alert("prometheus", "", "{}");
         act.Should().Throw<ArgumentException>().WithParameterName("dedupKey");
     }
+
+    [Fact]
+    public void Constructor_MalformedJsonPayload_Throws()
+    {
+        var act = () => new Alert("prometheus", "high-cpu:web-1", "not json");
+        act.Should().Throw<ArgumentException>().WithParameterName("payload");
+    }
 }

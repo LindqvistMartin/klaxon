@@ -8,8 +8,8 @@ Accepted.
 
 An escalation is a timer with teeth: "page level 1, wait 5 minutes for an ack,
 and if none comes, page level 2." The obvious implementation holds that timer in
-the process — a `Task.Delay`, a `System.Threading.Timer`, or a scheduled job in
-Hangfire/Quartz.
+the process — a `Task.Delay`, a `System.Threading.Timer`, or a job handed to a
+background scheduler.
 
 Every in-process variant shares one fatal property: **a restart loses the timer.**
 Deploys, crashes, OOM-kills, and host migrations all restart the process, and they
@@ -72,9 +72,10 @@ scan touches only live work.
 
 Deliberately **not** chosen:
 
-- **Hangfire / Quartz.** They reintroduce a scheduler to operate and back up, and
-  their durability guarantees are weaker and fuzzier than "the row is still in the
-  table." A `BackgroundService` over a Postgres table is less code and stronger.
+- **A dedicated job scheduler (Quartz and the like).** It reintroduces a component
+  to operate and back up, and its durability guarantees are weaker and fuzzier than
+  "the row is still in the table." A `BackgroundService` over a Postgres table is
+  less code and stronger.
 - **`LISTEN`/`NOTIFY`.** The trigger here is *time elapsing*, not an event. There is
   nothing to notify on. A cheap indexed poll is the natural fit.
 
@@ -82,11 +83,10 @@ Deliberately **not** chosen:
 
 **Plus**
 
-- Survives restarts by construction. This is verified by a restart-recovery
-  integration test (the contract for this ADR): create an escalation with a due
-  `NextTimeoutAt`, dispose and recreate the application over the *same* database,
-  and assert level 2 fires. If that test ever fails, the product's core promise is
-  broken.
+- Survives restarts by construction. The contract for this ADR is a restart-recovery
+  integration test: create an escalation with a due `NextTimeoutAt`, dispose and
+  recreate the application over the *same* database, and assert level 2 fires. It
+  lands with the engine, and if it ever fails the product's core promise is broken.
 - No external scheduler. One process, one Postgres, one `docker compose up`.
 - The claim query is the same at steady state and at boot, so there is a single code
   path to reason about.

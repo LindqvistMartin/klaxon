@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
@@ -7,10 +8,15 @@ namespace Klaxon.Infrastructure.Persistence;
 // Serializes an encapsulated list into a jsonb column. Used for Schedule.ParticipantOrder and
 // EscalationLevel.Targets, which are deliberately denormalized to jsonb rather than child tables
 // (see ADR-004). The comparer gives EF a correct snapshot/equality for the mutable collection so
-// change tracking does not silently miss edits or false-positive on every save.
+// change tracking does not silently miss edits or false-positive on every save. Enums are written
+// by name (JsonStringEnumConverter), matching the HasConversion<string>() columns, so reordering
+// EscalationTargetKind cannot silently re-map existing rows.
 internal static class JsonbConverters
 {
-    private static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web)
+    {
+        Converters = { new JsonStringEnumConverter() },
+    };
 
     public static ValueConverter<IReadOnlyList<T>, string> Converter<T>() =>
         new(

@@ -63,11 +63,11 @@ common case correctly first.
 
 **Plus**
 
-- Determinism. Because the resolver is pure and takes an `Instant`, its tests are
-  table-driven and cover the cases that actually break: spring-forward gap,
+- Determinism. Because the resolver is pure and takes an `Instant`, its tests can
+  be table-driven over the cases that actually break: spring-forward gap,
   fall-back overlap, handoff across a DST boundary, and override precedence — with
-  no clock, database, or HTTP to mock. This resolver is the correctness crown of the
-  product, and it is the easiest part to test rigorously.
+  no clock, database, or HTTP to mock. It is the highest-risk correctness surface
+  in the product and also the easiest to test in isolation.
 - The domain speaks the right language. `Instant`, `ZonedDateTime`, and
   `DateTimeZone` in the model make the timezone-correctness intent legible to anyone
   reading it, instead of hiding it behind ambiguous `DateTime`s.

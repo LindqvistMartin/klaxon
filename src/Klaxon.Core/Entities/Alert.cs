@@ -1,3 +1,4 @@
+using System.Text.Json;
 using NodaTime;
 
 namespace Klaxon.Core.Entities;
@@ -26,6 +27,16 @@ public sealed class Alert
         ArgumentException.ThrowIfNullOrWhiteSpace(source);
         ArgumentException.ThrowIfNullOrWhiteSpace(dedupKey);
         ArgumentException.ThrowIfNullOrWhiteSpace(payload);
+        // Payload lands in a jsonb column; reject malformed JSON here so it fails with a clear
+        // domain error at construction rather than a Postgres 22P02 at SaveChanges.
+        try
+        {
+            using var _ = JsonDocument.Parse(payload);
+        }
+        catch (JsonException ex)
+        {
+            throw new ArgumentException("Payload must be well-formed JSON.", nameof(payload), ex);
+        }
         Id = Guid.NewGuid();
         Source = source;
         DedupKey = dedupKey;
