@@ -5,6 +5,19 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore" Version="9.0.4" />
+    <!-- Npgsql 9.0.4 pins Relational to 9.0.1; pin it up to match EF Core 9.0.4 and silence the
+         MSB3277 version-unification warning that would otherwise surface in referencing projects. -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" Version="9.0.4" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="9.0.4">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="9.0.4" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL.NodaTime" Version="9.0.4" />
+  </ItemGroup>
+
+  <ItemGroup>
     <InternalsVisibleTo Include="Klaxon.Tests.Integration" />
     <InternalsVisibleTo Include="Klaxon.Tests.Unit" />
   </ItemGroup>
