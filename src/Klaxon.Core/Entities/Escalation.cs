@@ -47,4 +47,64 @@ public sealed class Escalation
         NextTimeoutAt = firstTimeoutAt;
         CreatedAt = SystemClock.Instance.GetCurrentInstant();
     }
+
+    // Called by the engine once the current level has been paged. The engine computes the next
+    // ack deadline from the policy and passes it in; a null deadline means there is no further
+    // level, so the escalation exhausts. Advance never reads Policy/Levels itself, which keeps the
+    // domain a pure, database-free state machine (ADR-004).
+    public void Advance(Instant? nextTimeoutAt)
+    {
+        if (State is not (EscalationState.Triggered or EscalationState.Notified))
+            throw new InvalidOperationException($"Cannot advance an escalation in state {State}.");
+
+        if (nextTimeoutAt is null)
+        {
+            Transition(EscalationState.Exhausted);
+            NextTimeoutAt = null;
+            return;
+        }
+
+        if (State == EscalationState.Triggered)
+            Transition(EscalationState.Notified); // first dispatch; level 0 stays current
+        else
+            CurrentLevel += 1; // next level armed; still waiting for an ack, so state is unchanged
+
+        NextTimeoutAt = nextTimeoutAt;
+    }
+
+    // Idempotent: the first ack on an open escalation stops the clock; a repeated ack, or a late
+    // ack that arrives after the escalation already resolved or exhausted, is a no-op. This is what
+    // makes at-least-once notification (ADR-003) safe.
+    public void Ack(Guid actor, Instant now)
+    {
+        if (actor == Guid.Empty)
+            throw new ArgumentException("Actor cannot be empty.", nameof(actor));
+
+        if (State is EscalationState.Acked or EscalationState.Resolved or EscalationState.Exhausted)
+            return;
+
+        Transition(EscalationState.Acked);
+        AckedBy = actor;
+        AckedAt = now;
+        NextTimeoutAt = null;
+    }
+
+    // Idempotent. Resolving an already-resolved or exhausted escalation is a no-op; Exhausted stays
+    // terminal so the "paged everyone, nobody acked" history is preserved.
+    public void Resolve(Instant now)
+    {
+        if (State is EscalationState.Resolved or EscalationState.Exhausted)
+            return;
+
+        Transition(EscalationState.Resolved);
+        ResolvedAt = now;
+        NextTimeoutAt = null;
+    }
+
+    private void Transition(EscalationState target)
+    {
+        if (!EscalationStateMachine.IsAllowed(State, target))
+            throw new InvalidOperationException($"Illegal escalation transition {State} -> {target}.");
+        State = target;
+    }
 }
