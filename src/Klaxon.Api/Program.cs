@@ -43,6 +43,12 @@ try
     builder.Services.AddProblemDetails();
     builder.Services.AddExceptionHandler<DomainExceptionHandler>();
 
+    // Route body-binding failures (malformed JSON, a missing required member) through the exception
+    // handler in every environment. ThrowOnBadRequest otherwise defaults to IsDevelopment, so in
+    // production a bad body would short-circuit to a bare 400; this makes it the same problem-details
+    // 400 the rest of the API emits, and keeps DomainExceptionHandler's BadHttpRequestException arm live.
+    builder.Services.Configure<RouteHandlerOptions>(options => options.ThrowOnBadRequest = true);
+
     builder.Services.AddHealthChecks()
         .AddCheck<PostgresHealthCheck>("postgres", tags: ["ready"]);
 

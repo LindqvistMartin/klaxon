@@ -44,6 +44,13 @@ public sealed class DomainExceptionHandler(IProblemDetailsService problemDetails
             DbUpdateException { InnerException: PostgresException { SqlState: PostgresErrorCodes.ForeignKeyViolation } } => (
                 StatusCodes.Status409Conflict, "A referenced resource does not exist.", null),
 
+            // A malformed or incomplete body (bad JSON, or a missing required member caught by
+            // RespectRequiredConstructorParameters) surfaces as BadHttpRequestException once
+            // ThrowOnBadRequest is on (see Program.cs). It already carries the right status; forward it
+            // rather than let it fall through to a 500.
+            BadHttpRequestException badRequest => (
+                badRequest.StatusCode, "The request body is invalid.", null),
+
             _ => (null, null, null),
         };
 }
