@@ -6,6 +6,10 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      # Satisfies Program.cs startup validation on the runner; the integration ApiFactory
+      # replaces this with the Testcontainers connection string via ConfigureWebHost.
+      ConnectionStrings__Postgres: "Host=placeholder;Database=placeholder;Username=placeholder;Password=placeholder"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
