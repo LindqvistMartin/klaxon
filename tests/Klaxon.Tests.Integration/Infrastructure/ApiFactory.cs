@@ -1,9 +1,12 @@
+using Klaxon.Infrastructure.BackgroundServices;
 using Klaxon.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Testcontainers.PostgreSql;
 using Xunit;
 
@@ -51,6 +54,26 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
                 ["ConnectionStrings:Postgres"] = _pg.GetConnectionString(),
             });
         });
+
+        // Strip the hosted escalation engine so its 1s poll never races test state, and register it
+        // as a plain singleton so the engine tests can resolve it and drive ProcessDueOnceAsync one
+        // deterministic tick at a time.
+        builder.ConfigureTestServices(services =>
+        {
+            RemoveHosted<EscalationEngine>(services);
+            services.AddSingleton<EscalationEngine>();
+        });
+    }
+
+    // Removes the AddHostedService registration for T by matching its ImplementationType, so the
+    // engine can be re-added as a plain singleton without also ticking on the poll loop.
+    private static void RemoveHosted<T>(IServiceCollection services) where T : IHostedService
+    {
+        var matches = services
+            .Where(d => d.ServiceType == typeof(IHostedService) && d.ImplementationType == typeof(T))
+            .ToList();
+        foreach (var descriptor in matches)
+            services.Remove(descriptor);
     }
 
     public async Task CleanAsync()
