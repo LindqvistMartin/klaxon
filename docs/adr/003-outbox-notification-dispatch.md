@@ -64,5 +64,5 @@ commit/send ordering applies to every one of them.
 - A latency floor of roughly one poll interval between "decided" and "sent". Fine for
   human paging.
 - Not yet implemented. The producer contract is fixed (ADR-001's claim transaction
-  already carries the `OutboxMessage`); the dispatcher, channels, and the
-  `Notification`/`OutboxMessage` tables arrive with the ingestion milestone.
+  will carry the `OutboxMessage`); the dispatcher, channels, and the
+  `Notification`/`OutboxMessage` tables arrive with the notification milestone.

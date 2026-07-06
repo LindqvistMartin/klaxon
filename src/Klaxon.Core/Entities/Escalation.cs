@@ -18,8 +18,10 @@ public sealed class Escalation
     // escalation reaches a terminal state. This column drives the durable due-scan (see ADR-001).
     public Instant? NextTimeoutAt { get; private set; }
 
-    // Lease held by the engine tick currently processing this row (FOR UPDATE SKIP LOCKED + lease),
-    // so concurrent ticks and the boot scan never page the same escalation twice.
+    // Reserved for the notification milestone. Once delivery runs outside the claim transaction, the
+    // engine will lease a claimed row so a crashed worker's in-flight escalation is reclaimed only
+    // after the lease lapses. The current claim/advance loop is a single transaction and relies on
+    // FOR UPDATE SKIP LOCKED alone, leaving this null.
     public Instant? LeaseUntil { get; private set; }
 
     public Guid? AckedBy { get; private set; }

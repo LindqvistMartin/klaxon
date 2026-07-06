@@ -2,7 +2,12 @@
 
 ## Status
 
-Accepted.
+Accepted. Shipped in phases. The `EscalationEngine` claim/advance loop lands first, with a
+lease-free `SELECT ... FOR UPDATE SKIP LOCKED` claim — claim and advance share one transaction, so
+the row lock alone prevents double-processing. The `LeaseUntil` lease shown below, the
+`Notification`, and the `OutboxMessage` written inside the claim transaction arrive with the
+notification milestone (ADR-003), where delivery separates from the claim and a crashed worker's
+in-flight row needs lease-based reclaim.
 
 ## Context
 
@@ -27,7 +32,7 @@ central design decision rather than being an afterthought.
 
 The `Escalations` table carries everything needed to resume: `State`,
 `CurrentLevel`, `NextTimeoutAt`, and `LeaseUntil`. A single
-`EscalationEngine : BackgroundService` runs a `PeriodicTimer` (~1s) that atomically
+`EscalationEngine : BackgroundService` runs a ~1s poll loop that atomically
 claims due rows and advances them — pages the current level, or marks the
 escalation `exhausted` when the levels run out. Advancing a level writes, in one
 transaction, the level change plus a `Notification` and an `OutboxMessage` (see
@@ -83,10 +88,11 @@ Deliberately **not** chosen:
 
 **Plus**
 
-- Survives restarts by construction. The contract for this ADR is a restart-recovery
-  integration test: create an escalation with a due `NextTimeoutAt`, dispose and
-  recreate the application over the *same* database, and assert level 2 fires. It
-  lands with the engine, and if it ever fails the product's core promise is broken.
+- Survives restarts by construction. The engine holds no in-process state, so a restart is
+  just a fresh instance re-running the scan. The contract for this ADR is a restart-recovery
+  integration test: create an escalation with a due `NextTimeoutAt`, run a fresh engine that
+  shares nothing in-process against the *same* database, and assert it advances to the next
+  level. It lands with the engine, and if it ever fails the product's core promise is broken.
 - No external scheduler. One process, one Postgres, one `docker compose up`.
 - The claim query is the same at steady state and at boot, so there is a single code
   path to reason about.

@@ -15,6 +15,11 @@
     </PackageReference>
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="9.0.4" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL.NodaTime" Version="9.0.4" />
+    <!-- BackgroundService + AddHostedService for the escalation engine. Just the hosting
+         abstraction, not a full Microsoft.AspNetCore.App FrameworkReference: this layer has no web
+         types, and pulling the whole web framework into persistence to get one base class would be
+         a dependency smell. -->
+    <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="9.0.4" />
   </ItemGroup>
 
   <ItemGroup>

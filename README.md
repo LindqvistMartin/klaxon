@@ -6,8 +6,9 @@
 [![.NET](https://img.shields.io/badge/.NET-10-purple.svg)](https://dotnet.microsoft.com)
 [![CI](https://github.com/LindqvistMartin/klaxon/actions/workflows/ci.yml/badge.svg)](https://github.com/LindqvistMartin/klaxon/actions)
 
-> **Status: early.** The domain model and persistence land first; the escalation
-> engine, HTTP API, and web UI follow. Watch the commits.
+> **Status: early.** The domain model, persistence, CRUD API, and the escalation
+> engine (durable claim-and-advance) have landed; notification delivery, alert
+> ingestion, and a web UI follow. Watch the commits.
 
 ## Why
 
