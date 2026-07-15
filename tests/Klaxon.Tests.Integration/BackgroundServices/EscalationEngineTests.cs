@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Klaxon.Core.Entities;
 using Klaxon.Infrastructure.BackgroundServices;
 using Klaxon.Infrastructure.Persistence;
@@ -141,6 +142,61 @@ public sealed class EscalationEngineTests(ApiFactory factory) : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Tick_PagedLevel_WritesOutboxRow()
+    {
+        var policyId = await SeedPolicyAsync(60, 60);
+        var escalationId = await SeedDueEscalationAsync(policyId);
+
+        await Engine().ProcessDueOnceAsync(CancellationToken.None);
+
+        var outbox = await LoadOutboxAsync();
+        outbox.Should().ContainSingle();
+        outbox[0].Type.Should().Be(OutboxMessageTypes.EscalationLevelPaged);
+        outbox[0].ProcessedAt.Should().BeNull();
+        // Nothing type-checks the payload until a channel parses it, so pin the exact property
+        // names on the wire here.
+        var payload = JsonSerializer.Deserialize<JsonElement>(outbox[0].Payload);
+        payload.GetProperty("EscalationId").GetGuid().Should().Be(escalationId);
+        payload.GetProperty("Level").GetInt32().Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Tick_Exhaustion_WritesExhaustedRowAndNoPagedRow()
+    {
+        var policyId = await SeedPolicyAsync(1);
+        var escalationId = await SeedDueEscalationAsync(policyId);
+
+        await Engine().ProcessDueOnceAsync(CancellationToken.None); // pages the only level
+        await MakeDueAsync(escalationId);
+        await Engine().ProcessDueOnceAsync(CancellationToken.None); // no next level -> exhaust
+
+        var outbox = await LoadOutboxAsync();
+        // Exhausting is its own event, not a page: the row carries no level, and the level paged on
+        // the tick before is not re-announced.
+        outbox.Select(m => m.Type).Should().Equal(
+            OutboxMessageTypes.EscalationLevelPaged,
+            OutboxMessageTypes.EscalationExhausted);
+        JsonSerializer.Deserialize<JsonElement>(outbox[1].Payload)
+            .GetProperty("EscalationId").GetGuid().Should().Be(escalationId);
+    }
+
+    [Fact]
+    public async Task Tick_PagesEachLevelOnceInOrder()
+    {
+        var policyId = await SeedPolicyAsync(1, 1);
+        var escalationId = await SeedDueEscalationAsync(policyId);
+
+        await Engine().ProcessDueOnceAsync(CancellationToken.None);
+        await MakeDueAsync(escalationId);
+        await Engine().ProcessDueOnceAsync(CancellationToken.None);
+
+        var pagedLevels = (await LoadOutboxAsync())
+            .Where(m => m.Type == OutboxMessageTypes.EscalationLevelPaged)
+            .Select(m => JsonSerializer.Deserialize<JsonElement>(m.Payload).GetProperty("Level").GetInt32());
+        pagedLevels.Should().Equal(0, 1);
+    }
+
+    [Fact]
     public async Task Restart_ResumesFromPostgresState()
     {
         var policyId = await SeedPolicyAsync(1, 1);
@@ -185,6 +241,9 @@ public sealed class EscalationEngineTests(ApiFactory factory) : IAsyncLifetime
         var escalation = await LoadEscalationAsync(escalationId);
         escalation.State.Should().Be(EscalationState.Notified);
         escalation.CurrentLevel.Should().Be(0); // advanced once, not twice
+        // The outbox write rides inside the claim's row lock, so the tick that skipped the row
+        // emits nothing and the page cannot be duplicated on the wire either.
+        (await LoadOutboxAsync()).Should().ContainSingle();
     }
 
     private EscalationEngine Engine() => factory.Services.GetRequiredService<EscalationEngine>();
@@ -258,5 +317,12 @@ public sealed class EscalationEngineTests(ApiFactory factory) : IAsyncLifetime
         using var scope = factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<KlaxonDbContext>();
         return await db.Escalations.AsNoTracking().SingleAsync(e => e.Id == escalationId);
+    }
+
+    private async Task<List<OutboxMessage>> LoadOutboxAsync()
+    {
+        using var scope = factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<KlaxonDbContext>();
+        return await db.OutboxMessages.AsNoTracking().OrderBy(m => m.CreatedAt).ToListAsync();
     }
 }

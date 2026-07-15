@@ -1,4 +1,5 @@
 using Klaxon.Infrastructure.BackgroundServices;
+using Klaxon.Infrastructure.Notifications;
 using Klaxon.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -6,6 +7,7 @@ using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Testcontainers.PostgreSql;
 using Xunit;
@@ -55,13 +57,22 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
             });
         });
 
-        // Strip the hosted escalation engine so its 1s poll never races test state, and register it
-        // as a plain singleton so the engine tests can resolve it and drive ProcessDueOnceAsync one
-        // deterministic tick at a time.
+        // Strip both hosted pollers so neither races test state, and register each as a plain
+        // singleton so the tests can resolve it and drive one deterministic tick at a time. The
+        // dispatcher matters as much as the engine here: left running, it would drain the outbox
+        // out from under the engine tests that assert what was written.
         builder.ConfigureTestServices(services =>
         {
             RemoveHosted<EscalationEngine>(services);
             services.AddSingleton<EscalationEngine>();
+
+            RemoveHosted<NotificationDispatcher>(services);
+            services.AddSingleton<NotificationDispatcher>();
+
+            // Swap the log channel for one the tests can read back and fail on demand.
+            services.RemoveAll<INotificationChannel>();
+            services.AddSingleton<RecordingChannel>();
+            services.AddSingleton<INotificationChannel>(sp => sp.GetRequiredService<RecordingChannel>());
         });
     }
 
@@ -76,14 +87,18 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
             services.Remove(descriptor);
     }
 
+    // The one clean-slate call: a test class that only knows about this still gets an empty channel,
+    // so a sticky ThrowOnSend or a stale Sent list cannot leak into it.
     public async Task CleanAsync()
     {
+        Services.GetRequiredService<RecordingChannel>().Reset();
+
         using var scope = Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<KlaxonDbContext>();
         // One statement; CASCADE chases every FK dependent, so ordering does not matter. Add a
         // table here when a new entity lands — the list is not derived from EF metadata.
         await db.Database.ExecuteSqlRawAsync(
-            """TRUNCATE TABLE "Escalations", "Alerts", "EscalationLevels", "EscalationPolicies", "ScheduleOverrides", "Schedules", "Users", "Teams", "Organizations" CASCADE""");
+            """TRUNCATE TABLE "Escalations", "Alerts", "EscalationLevels", "EscalationPolicies", "ScheduleOverrides", "Schedules", "Users", "Teams", "Organizations", "OutboxMessages" CASCADE""");
     }
 
     public override async ValueTask DisposeAsync()
