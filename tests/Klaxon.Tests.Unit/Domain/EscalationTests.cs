@@ -27,7 +27,6 @@ public sealed class EscalationTests
         escalation.State.Should().Be(EscalationState.Triggered);
         escalation.CurrentLevel.Should().Be(0);
         escalation.NextTimeoutAt.Should().Be(Timeout);
-        escalation.LeaseUntil.Should().BeNull();
         escalation.AckedBy.Should().BeNull();
         escalation.AckedAt.Should().BeNull();
         escalation.ResolvedAt.Should().BeNull();

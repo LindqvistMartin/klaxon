@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Klaxon.Core.Entities;
 using Klaxon.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -12,8 +13,9 @@ namespace Klaxon.Infrastructure.BackgroundServices;
 // claimed under FOR UPDATE SKIP LOCKED, advanced one level — or exhausted once the policy runs out
 // of levels — and its new state committed to Postgres. All timer state lives in the Escalations
 // table, so a restart resumes by re-running the same scan; there is no in-process timer to lose.
-// Delivery — writing an OutboxMessage in this transaction — arrives with the notification milestone
-// (ADR-003); this milestone ships the claim/advance loop.
+// The page itself is not sent from here: the same transaction writes an OutboxMessage that the
+// NotificationDispatcher drains, so the state change and the notification intent land together
+// (ADR-003).
 public sealed class EscalationEngine(
     IServiceScopeFactory scopeFactory,
     ILogger<EscalationEngine> logger) : BackgroundService
@@ -67,11 +69,9 @@ public sealed class EscalationEngine(
             // ADR-001's due scan. FOR UPDATE SKIP LOCKED holds each claimed row for the life of the
             // transaction, so a second tick — or a second instance mid-deploy — skips a locked row
             // rather than blocking or paging it twice; advancing NextTimeoutAt then drops the row
-            // out of the next scan. The partial IX_Escalations_Due keeps the poll cheap. (ADR-001's
-            // SQL also writes a LeaseUntil lease; that is deferred to the notification milestone,
-            // where claim and delivery split into two transactions and a crashed worker's in-flight
-            // row needs lease-based reclaim. Here claim and advance are one transaction, so the row
-            // lock alone is enough.)
+            // out of the next scan. The partial IX_Escalations_Due keeps the poll cheap. The lock
+            // is the whole claim: it dies with the backend that held it, so a crashed worker's rows
+            // are due again on the very next tick, with no lease to wait out (ADR-001).
             var due = await db.Escalations
                 .FromSqlRaw("""
                     SELECT * FROM "Escalations"
@@ -117,6 +117,26 @@ public sealed class EscalationEngine(
                     : null;
 
                 escalation.Advance(nextTimeoutAt);
+
+                // The page rides in the same transaction as the state change, so the two land
+                // together or not at all and a page is never lost between "decided" and "sent"
+                // (ADR-003).
+                if (nextTimeoutAt is null)
+                {
+                    // Exhaustion goes through the outbox like every other page rather than a direct
+                    // call, which keeps it exactly as durable, and it is loud (ADR-004).
+                    db.OutboxMessages.Add(new OutboxMessage(
+                        OutboxMessageTypes.EscalationExhausted,
+                        JsonSerializer.Serialize(new { EscalationId = escalation.Id })));
+                    logger.LogError(
+                        "Escalation {EscalationId} exhausted its policy with no ack", escalation.Id);
+                }
+                else
+                {
+                    db.OutboxMessages.Add(new OutboxMessage(
+                        OutboxMessageTypes.EscalationLevelPaged,
+                        JsonSerializer.Serialize(new { EscalationId = escalation.Id, Level = nextOrdinal })));
+                }
             }
 
             await db.SaveChangesAsync(ct);

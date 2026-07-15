@@ -3,6 +3,7 @@ using System;
 using Klaxon.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using NodaTime;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
@@ -12,9 +13,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace Klaxon.Infrastructure.Migrations
 {
     [DbContext(typeof(KlaxonDbContext))]
-    partial class KlaxonDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260715103807_AddOutbox")]
+    partial class AddOutbox
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -84,6 +87,9 @@ namespace Klaxon.Infrastructure.Migrations
 
                     b.Property<int>("CurrentLevel")
                         .HasColumnType("integer");
+
+                    b.Property<Instant?>("LeaseUntil")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<Instant?>("NextTimeoutAt")
                         .HasColumnType("timestamp with time zone");

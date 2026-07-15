@@ -2,12 +2,18 @@
 
 ## Status
 
-Accepted. Shipped in phases. The `EscalationEngine` claim/advance loop lands first, with a
-lease-free `SELECT ... FOR UPDATE SKIP LOCKED` claim — claim and advance share one transaction, so
-the row lock alone prevents double-processing. The `LeaseUntil` lease shown below, the
-`Notification`, and the `OutboxMessage` written inside the claim transaction arrive with the
-notification milestone (ADR-003), where delivery separates from the claim and a crashed worker's
-in-flight row needs lease-based reclaim.
+Accepted. Shipped in phases: the `EscalationEngine` claim/advance loop landed first, and the
+`OutboxMessage` written inside the claim transaction landed with the notification milestone
+(ADR-003).
+
+The `LeaseUntil` lease this ADR originally prescribed is **superseded, and the column is gone**. Its
+premise was that delivery would eventually hold a claimed escalation across the send, leaving a
+crashed worker's in-flight row to be reclaimed only once its lease lapsed. ADR-003 did separate
+delivery from the claim — but by moving it to a *different table*, not by holding the row longer.
+The dispatcher locks `OutboxMessages` and never touches `Escalations`, so the escalation row is
+never held across a network call and the row lock alone is the entire claim. A lease does belong to
+the dispatcher's outbox claim once a channel makes a network call — a different column on a
+different table (see ADR-003).
 
 ## Context
 
@@ -31,32 +37,30 @@ central design decision rather than being an afterthought.
 **Escalation state lives in Postgres, and the engine is stateless.**
 
 The `Escalations` table carries everything needed to resume: `State`,
-`CurrentLevel`, `NextTimeoutAt`, and `LeaseUntil`. A single
+`CurrentLevel`, and `NextTimeoutAt`. A single
 `EscalationEngine : BackgroundService` runs a ~1s poll loop that atomically
 claims due rows and advances them — pages the current level, or marks the
 escalation `exhausted` when the levels run out. Advancing a level writes, in one
-transaction, the level change plus a `Notification` and an `OutboxMessage` (see
-ADR-003).
+transaction, the level change plus an `OutboxMessage` (see ADR-003).
 
 The claim is atomic under concurrency:
 
 ```sql
-UPDATE "Escalations" SET "LeaseUntil" = now() + interval '30 seconds'
-WHERE "Id" IN (
-  SELECT "Id" FROM "Escalations"
-  WHERE "State" IN ('Triggered', 'Notified')
-    AND "NextTimeoutAt" <= now()
-    AND ("LeaseUntil" IS NULL OR "LeaseUntil" <= now())
-  ORDER BY "NextTimeoutAt"
-  FOR UPDATE SKIP LOCKED
-  LIMIT 100)
-RETURNING *;
+SELECT * FROM "Escalations"
+WHERE "State" IN ('Triggered', 'Notified')
+  AND "NextTimeoutAt" <= now()
+ORDER BY "NextTimeoutAt"
+FOR UPDATE SKIP LOCKED
+LIMIT 100;
 ```
 
-`FOR UPDATE SKIP LOCKED` plus the `LeaseUntil` lease means two concurrent ticks — or
-a boot scan that overlaps a still-running tick, or a second instance during a
-rolling deploy — never page the same escalation twice. A worker that crashes
-mid-batch simply lets its lease lapse, and the row is reclaimed on a later tick.
+`FOR UPDATE SKIP LOCKED` means two concurrent ticks — or a boot scan that overlaps
+a still-running tick, or a second instance during a rolling deploy — never page the
+same escalation twice: the lock is held for the life of the claim transaction, and a
+second tick skips a locked row rather than blocking on it. Claim and advance share
+that transaction, so a worker that crashes mid-batch rolls back and its rows are due
+again on the very next tick. Postgres drops the lock with the backend that held it,
+which makes recovery cost one poll interval and need no reclaim machinery at all.
 
 **Resumption needs no special code.** On startup the engine runs the exact same
 scan. Any escalation whose `NextTimeoutAt` has passed is due, gets claimed, and is
@@ -83,6 +87,14 @@ Deliberately **not** chosen:
   less code and stronger.
 - **`LISTEN`/`NOTIFY`.** The trigger here is *time elapsing*, not an event. There is
   nothing to notify on. A cheap indexed poll is the natural fit.
+- **A lease on the claim.** An earlier draft of this ADR claimed rows with a committing
+  `UPDATE ... SET "LeaseUntil" = now() + interval '30 seconds' ... RETURNING *`. A claim that
+  commits outlives its transaction, which is what creates the need for a lease to expire in the
+  first place; keeping the claim inside the transaction makes the row lock the claim, and Postgres
+  releases it on crash for free. The lease was also worse than no lease here: it delayed reclaim
+  from one poll interval to the lease duration, and nothing cleared it on advance, so its
+  `("LeaseUntil" IS NULL OR "LeaseUntil" <= now())` predicate would have silently stretched every
+  ack window shorter than 30s out to 30s.
 
 ## Consequences
 
@@ -102,6 +114,7 @@ Deliberately **not** chosen:
 - A latency floor of roughly one poll interval (~1s) between "timeout elapsed" and
   "page sent." For human paging this is irrelevant; nobody notices a one-second
   difference on a five-minute escalation timer.
-- The lease duration (30s) bounds how long a crashed worker's claimed rows sit
-  before another tick can reclaim them. Short enough to be invisible to humans, long
-  enough to comfortably exceed one tick.
+- A batch is all-or-nothing: one failed write rolls back every escalation the tick
+  claimed, and they are all re-claimed on the next one. At a hundred rows a tick and a
+  one-second retry that is a fair trade for never having to reason about a half-applied
+  batch.

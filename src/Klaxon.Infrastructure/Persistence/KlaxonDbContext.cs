@@ -14,6 +14,7 @@ public sealed class KlaxonDbContext(DbContextOptions<KlaxonDbContext> options) :
     public DbSet<EscalationLevel> EscalationLevels => Set<EscalationLevel>();
     public DbSet<Alert> Alerts => Set<Alert>();
     public DbSet<Escalation> Escalations => Set<Escalation>();
+    public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
         => modelBuilder.ApplyConfigurationsFromAssembly(typeof(KlaxonDbContext).Assembly);

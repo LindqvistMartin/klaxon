@@ -2,9 +2,9 @@
 
 ## Status
 
-Accepted. The dedup/open-invariant indexes and the jsonb storage ship in the initial
-migration; the escalation state-machine methods (`Advance`/`Ack`/`Resolve`) land with
-the engine, but the states and transition rules are fixed here.
+Accepted and implemented. The dedup/open-invariant indexes and the jsonb storage shipped in
+the initial migration; the state-machine methods (`Advance`/`Ack`/`Resolve`) landed with the
+engine.
 
 ## Context
 
@@ -43,8 +43,10 @@ in `Klaxon.Core` instead of a `switch` in a controller.
   no-op. This is what makes at-least-once notification (ADR-003) safe: a duplicate page
   acks to the same state.
 - **Exhaustion is loud, never silent.** All levels passed with no ack moves the
-  escalation to `Exhausted` — a terminal state with a metric and an ERROR log — and
-  emits an outbound webhook through the outbox (ADR-003). It is never a quiet drop.
+  escalation to `Exhausted` — a terminal state with an ERROR log — and writes an
+  `EscalationExhausted` row through the outbox (ADR-003) for delivery like any other
+  page. It is never a quiet drop. A metric belongs here too, once there is a meter to
+  raise it on (see ADR-003's consequences).
 - `Acked` is deliberately still "open" for the `IX_Escalations_Open` filter: an
   acknowledged page still holds the slot for its alert until it resolves.
 
@@ -75,6 +77,3 @@ so reordering an enum cannot silently re-map stored rows.
 
 - jsonb references are not FK-checked; a dangling target id is possible and must be
   validated in the application and tolerated at read time.
-- The state-machine methods are not implemented yet — the states, transition matrix,
-  and ack/exhaustion rules are decided here; `Advance`/`Ack`/`Resolve` land with the
-  engine.
