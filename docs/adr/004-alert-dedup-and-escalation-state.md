@@ -2,9 +2,14 @@
 
 ## Status
 
-Accepted and implemented. The dedup/open-invariant indexes and the jsonb storage shipped in
-the initial migration; the state-machine methods (`Advance`/`Ack`/`Resolve`) landed with the
-engine.
+Accepted and implemented. The indexes and the jsonb storage shipped in the initial
+migration; the state-machine methods (`Advance`/`Ack`/`Resolve`) landed with the engine;
+dedup landed with alert ingestion, which is the only thing that creates an alert.
+
+Until ingestion existed, the dedup half of this record described an intention rather than
+behaviour: no code read the index, and nothing could move an alert off `Open`, so the
+filter that makes it a *partial* index could never be false and it constrained every row
+ever written. `Alert.Resolve` is what closes that.
 
 ## Context
 
@@ -20,8 +25,8 @@ An alert carries `(Source, DedupKey)`. Two invariants, both enforced in the data
 as **filtered unique indexes** rather than plain constraints:
 
 - `IX_Alerts_OpenDedup` — unique on `(Source, DedupKey)` `WHERE "Status" = 'Open'`.
-  Ingestion upserts onto the open row (`ON CONFLICT`), so a re-firing alert reuses the
-  existing row instead of creating a second one.
+  Ingestion looks the open row up and reuses it, so a re-firing alert rides the incident
+  already running instead of opening a second one.
 - `IX_Escalations_Open` — unique on `(AlertId)` `WHERE "State" NOT IN ('Resolved',
   'Exhausted')`. At most one live escalation per alert.
 
@@ -30,6 +35,31 @@ launching a fresh page storm. The filter is the load-bearing part: a plain uniqu
 index on `(Source, DedupKey)` would be wrong, because it would forbid a *new* alert
 after the previous one resolved. The invariant is "one *open* per key", not "one ever",
 and only a partial index expresses that.
+
+The lookup is a read followed by an insert, not an `ON CONFLICT` upsert. The index rather
+than the lookup is what holds the invariant: two ingests racing on a key that is not open
+yet both miss the read, and the second insert takes the unique violation instead of opening
+a duplicate incident.
+
+### One escalation per alert row
+
+An escalation is created when an alert row is inserted, and only then. A firing that
+deduplicates onto an open alert neither opens a second escalation nor restarts the first:
+once a policy has paged every level and nobody answered, repeated firings attach to the
+incident that is already there rather than re-running the ladder.
+
+That leaves one state deliberately holed: an alert still `Open` whose escalation has
+`Exhausted`. It holds the dedup key, so re-firings attach to it and page nobody until a
+resolved notification closes it. This is not the silent non-page ADR-001 exists to prevent —
+reaching `Exhausted` means every level was paged, an ERROR was logged, and an
+`EscalationExhausted` row went through the outbox, which is as loud as this system gets. It
+is the absence of a re-notification policy, and that is where one belongs when there is a
+reason to write one.
+
+Because only an insert creates an escalation, no code path attempts a second one for the
+same alert, so `IX_Escalations_Open` cannot fire from anything the product does today. It
+stays as the constraint that keeps the rule true in the database rather than only in an
+endpoint.
 
 ### Escalation states
 
@@ -77,3 +107,12 @@ so reordering an enum cannot silently re-map stored rows.
 
 - jsonb references are not FK-checked; a dangling target id is possible and must be
   validated in the application and tolerated at read time.
+- Two ingests racing on a key nobody has opened yet leave the loser holding a 409, saying
+  "conflict" about an alert its twin ingested a millisecond earlier. Nothing is lost — the
+  incident is open and its page went out — but the answer is wrong for what happened. An
+  upsert would answer 202 to both by serialising them on the conflicting row's lock; that is
+  the reason to reach for one, and a hand-written INSERT column list that drifts the first
+  time `Alerts` gains a column is the reason not to yet.
+- A deduplicated firing writes nothing, so the stored payload stays the one that opened the
+  incident rather than the most recent. Where a payload is a snapshot of a condition that is
+  still true, that is the more useful of the two; it is a choice, not an oversight.

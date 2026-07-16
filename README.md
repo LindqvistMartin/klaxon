@@ -7,9 +7,10 @@
 [![CI](https://github.com/LindqvistMartin/klaxon/actions/workflows/ci.yml/badge.svg)](https://github.com/LindqvistMartin/klaxon/actions)
 
 > **Status: early.** The domain model, persistence, CRUD API, the escalation engine
-> (durable claim-and-advance), and outbox-backed delivery to a log channel have
-> landed; remote notification channels, alert ingestion, and a web UI follow. Watch
-> the commits.
+> (durable claim-and-advance), outbox-backed delivery to a log channel, and webhook
+> alert ingestion have landed — an alert posted to the ingest endpoint opens an
+> escalation and pages its first level. Remote notification channels, payload parsers
+> per source, and a web UI follow. Watch the commits.
 
 ## Why
 
@@ -55,8 +56,8 @@ dotnet test
 ```
 
 Requires the .NET 10 SDK. The unit tests need no services. A Postgres connection string
-(`ConnectionStrings:Postgres`) is needed to run the API; integration tests, as they land,
-spin up their own Postgres via Testcontainers.
+(`ConnectionStrings:Postgres`) is needed to run the API; the integration tests spin up their
+own Postgres via Testcontainers and need a running Docker.
 
 ## Roadmap
 

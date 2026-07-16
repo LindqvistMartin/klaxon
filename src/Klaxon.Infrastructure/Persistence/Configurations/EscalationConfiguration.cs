@@ -30,10 +30,19 @@ internal sealed class EscalationConfiguration : IEntityTypeConfiguration<Escalat
             .HasFilter("""("State" IN ('Triggered', 'Notified'))""");
 
         // At most one open escalation per alert — the invariant that makes flap-suppression real
-        // (see ADR-004). Terminal states drop out of the filter so a resolved alert can re-open.
+        // (see ADR-004). Terminal states drop out of the filter, so the fresh alert a key opens
+        // after its last incident resolved brings a fresh escalation with it.
         builder.HasIndex(x => x.AlertId)
             .HasDatabaseName("IX_Escalations_Open")
             .IsUnique()
             .HasFilter("""("State" NOT IN ('Resolved', 'Exhausted'))""");
+
+        // The FK's plain index, which the convention would normally add for us: it skips that when an
+        // index on the same column already exists, and it compares columns without looking at the
+        // filter. IX_Escalations_Open is partial, so an unfiltered lookup by AlertId — what ingestion
+        // does on every deduplicated firing — could not use it and scanned the table. The named
+        // overload is what declares a second index over the same column rather than reconfiguring
+        // the first.
+        builder.HasIndex(x => x.AlertId, "IX_Escalations_AlertId");
     }
 }

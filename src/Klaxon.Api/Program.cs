@@ -86,6 +86,7 @@ try
     v1.MapScheduleEndpoints();
     v1.MapScheduleOverrideEndpoints();
     v1.MapEscalationPolicyEndpoints();
+    v1.MapAlertEndpoints();
 
     app.Run();
 }
