@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -50,6 +51,13 @@ public sealed class DomainExceptionHandler(IProblemDetailsService problemDetails
             // rather than let it fall through to a 500.
             BadHttpRequestException badRequest => (
                 badRequest.StatusCode, "The request body is invalid.", null),
+
+            // A body that is well-formed JSON but not the shape its format's parser expects surfaces
+            // here rather than at binding, now that the ingest URL decides the shape instead of the
+            // framework. Without an arm it would be a 500 for a request that is merely malformed, and
+            // a sender that retries 5xx would repeat it forever.
+            JsonException => (
+                StatusCodes.Status400BadRequest, "The request body is invalid.", null),
 
             _ => (null, null, null),
         };

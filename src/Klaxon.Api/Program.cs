@@ -2,6 +2,7 @@ using System.Text.Json.Serialization;
 using Klaxon.Api.Endpoints;
 using Klaxon.Api.Errors;
 using Klaxon.Api.HealthChecks;
+using Klaxon.Api.Ingestion;
 using Klaxon.Infrastructure;
 using Klaxon.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
@@ -39,6 +40,11 @@ try
         options.SerializerOptions.RespectNullableAnnotations = true;
         options.SerializerOptions.RespectRequiredConstructorParameters = true;
     });
+
+    // The {format} segment of an ingest URL selects the parser (ADR-006). A new payload shape is one
+    // class plus one keyed line. Registered after the JSON options above, which the generic parser
+    // reads so that a body binds exactly as it did when the endpoint took the record directly.
+    builder.Services.AddKeyedSingleton<IAlertSourceAdapter, GenericAlertSourceAdapter>("generic");
 
     builder.Services.AddProblemDetails();
     builder.Services.AddExceptionHandler<DomainExceptionHandler>();

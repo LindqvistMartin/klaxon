@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Klaxon.Api.Contracts;
@@ -175,8 +175,9 @@ public sealed class AlertIngestTests(ApiFactory factory) : IAsyncLifetime
         var response = await factory.CreateClient().PostAsJsonAsync(Url("nagios", policyId),
             new { dedupKey = Key, status = "Firing" }, TestJson.Options);
 
-        // Payload is a required, non-nullable record parameter, so omitting it throws during
-        // binding — the framework's 400, distinct from the domain guard below.
+        // Payload is a required, non-nullable record parameter, so omitting it throws in the parser
+        // the format selected — reaching the same 400 the framework used to answer when the endpoint
+        // bound this record itself. Distinct from the domain guard below.
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
         var problem = await response.Content.ReadFromJsonAsync<ProblemDetails>(TestJson.Options);
         problem!.Title.Should().Be("The request body is invalid.");
@@ -225,7 +226,8 @@ public sealed class AlertIngestTests(ApiFactory factory) : IAsyncLifetime
         await act.Should().NotThrowAsync();
     }
 
-    private static string Url(string source, Guid policyId) => $"/api/v1/alerts/ingest/{source}/{policyId}";
+    private static string Url(string source, Guid policyId, string format = "generic") =>
+        $"/api/v1/alerts/ingest/{format}/{source}/{policyId}";
 
     private static IngestAlertRequest Firing(string dedupKey) => new(
         dedupKey, AlertIngestStatus.Firing,

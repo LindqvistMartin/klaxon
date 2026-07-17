@@ -1,4 +1,6 @@
+using System.Text.Json;
 using Klaxon.Api.Contracts;
+using Klaxon.Api.Ingestion;
 using Klaxon.Core.Entities;
 using Klaxon.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -16,16 +18,29 @@ public static class AlertEndpoints
         // monitoring system can be configured with (ADR-005). The 202 is returned only after the
         // commit: a source treats 2xx as delivered and will not send the alert again, so acking
         // before the write would drop it on a crash.
-        alerts.MapPost("/ingest/{source}/{policyId:guid}", async (
+        alerts.MapPost("/ingest/{format}/{source}/{policyId:guid}", async (
+            string format,
             string source,
             Guid policyId,
-            IngestAlertRequest request,
+            JsonElement body,
+            IServiceProvider services,
             KlaxonDbContext db,
             CancellationToken ct) =>
         {
             // A 409 here would say "conflict" about a URL that is simply wrong.
             if (!await db.EscalationPolicies.AnyAsync(policy => policy.Id == policyId, ct))
                 return Results.Problem(statusCode: StatusCodes.Status404NotFound);
+
+            // {format} names the payload shape, {source} the integration: a parser needs a closed set
+            // of names, a dedup identity an open one (ADR-006). Lowercased because a vocabulary can be
+            // normalised where an identity cannot. An unregistered format is a 404 for the same reason
+            // an unknown policy is, and never a fallback: the wrong parser reading a body it cannot
+            // understand answers 400, which Alertmanager treats as permanent and drops.
+            var adapter = services.GetKeyedService<IAlertSourceAdapter>(format.ToLowerInvariant());
+            if (adapter is null)
+                return Results.Problem(statusCode: StatusCodes.Status404NotFound);
+
+            var request = adapter.Parse(body);
 
             var now = SystemClock.Instance.GetCurrentInstant();
 
