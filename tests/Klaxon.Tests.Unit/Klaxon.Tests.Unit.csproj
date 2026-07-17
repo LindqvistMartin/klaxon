@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <ProjectReference Include="..\..\src\Klaxon.Api\Klaxon.Api.csproj" />
     <ProjectReference Include="..\..\src\Klaxon.Core\Klaxon.Core.csproj" />
     <ProjectReference Include="..\..\src\Klaxon.Infrastructure\Klaxon.Infrastructure.csproj" />
   </ItemGroup>

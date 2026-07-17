@@ -1,4 +1,4 @@
-﻿using System.Net;
+using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Klaxon.Api.Contracts;
@@ -226,8 +226,147 @@ public sealed class AlertIngestTests(ApiFactory factory) : IAsyncLifetime
         await act.Should().NotThrowAsync();
     }
 
+    [Fact]
+    public async Task IngestPrometheus_FiringGroup_CreatesIncidentAndPages()
+    {
+        var policyId = await SeedPolicyAsync(60, 120);
+
+        var response = await IngestPrometheusAsync(policyId, Envelope(GroupKey));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        var ingested = (await response.Content.ReadFromJsonAsync<AlertIngestResponse>(TestJson.Options))!;
+        ingested.Outcome.Should().Be(AlertIngestOutcome.Created);
+
+        (await Engine().ProcessDueOnceAsync(CancellationToken.None)).Should().Be(1);
+        (await Dispatcher().ProcessOnceAsync(CancellationToken.None)).Should().Be(1);
+        Channel().Sent.Should().ContainSingle();
+
+        // The envelope is stored whole, which is what keeps the hashed dedup key debuggable: the
+        // verbatim groupKey is only recoverable from the payload.
+        var alert = await LoadAlertAsync(ingested.AlertId!.Value);
+        using var payload = JsonDocument.Parse(alert.Payload);
+        payload.RootElement.GetProperty("groupKey").GetString().Should().Be(GroupKey);
+    }
+
+    [Fact]
+    public async Task IngestPrometheus_GroupKeyLongerThanTheDedupColumn_StillPages()
+    {
+        var policyId = await SeedPolicyAsync(60);
+
+        var response = await IngestPrometheusAsync(policyId, Envelope(new string('g', 5000)));
+
+        // A stock group_by blows the 200-char dedup column. Unhashed this is a 400, and Alertmanager
+        // drops 4xx permanently — no retry, no row, nobody paged for the group, ever, with the only
+        // trace in the sender's own logs.
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        (await Engine().ProcessDueOnceAsync(CancellationToken.None)).Should().Be(1);
+        await Dispatcher().ProcessOnceAsync(CancellationToken.None);
+        Channel().Sent.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task IngestPrometheus_ResolvedGroup_ResolvesIncidentSoEngineStopsPaging()
+    {
+        var policyId = await SeedPolicyAsync(60, 120);
+        var created = await IngestPrometheusAsync(policyId, Envelope(GroupKey));
+        var createdBody = (await created.Content.ReadFromJsonAsync<AlertIngestResponse>(TestJson.Options))!;
+        await Engine().ProcessDueOnceAsync(CancellationToken.None);
+
+        var response = await IngestPrometheusAsync(policyId, Envelope(GroupKey, status: "resolved"));
+
+        // Firing and resolve derive the key the same way, or the resolve finds nothing: the alert
+        // would stay Open holding its slot in IX_Alerts_OpenDedup, and every later firing of the
+        // group would deduplicate onto a zombie and page nobody.
+        var resolved = (await response.Content.ReadFromJsonAsync<AlertIngestResponse>(TestJson.Options))!;
+        resolved.Outcome.Should().Be(AlertIngestOutcome.Resolved);
+        resolved.EscalationId.Should().Be(createdBody.EscalationId);
+
+        await MakeDueAsync(createdBody.EscalationId!.Value);
+        (await Engine().ProcessDueOnceAsync(CancellationToken.None)).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task IngestPrometheus_GroupFiresAgainAfterResolve_PagesTwice()
+    {
+        var policyId = await SeedPolicyAsync(60);
+        var first = await IngestPrometheusAsync(policyId, Envelope(GroupKey));
+        var firstBody = (await first.Content.ReadFromJsonAsync<AlertIngestResponse>(TestJson.Options))!;
+        await Engine().ProcessDueOnceAsync(CancellationToken.None);
+        await IngestPrometheusAsync(policyId, Envelope(GroupKey, status: "resolved"));
+
+        var second = await IngestPrometheusAsync(policyId, Envelope(GroupKey));
+
+        var secondBody = (await second.Content.ReadFromJsonAsync<AlertIngestResponse>(TestJson.Options))!;
+        secondBody.Outcome.Should().Be(AlertIngestOutcome.Created);
+
+        (await Engine().ProcessDueOnceAsync(CancellationToken.None)).Should().Be(1);
+        await Dispatcher().ProcessOnceAsync(CancellationToken.None);
+        Channel().Sent.Select(EscalationIdOf).Should()
+            .Equal(firstBody.EscalationId!.Value, secondBody.EscalationId!.Value);
+    }
+
+    [Fact]
+    public async Task IngestPrometheus_EnvelopeSentToTheGenericFormat_Returns400()
+    {
+        var policyId = await SeedPolicyAsync(60);
+
+        var response = await factory.CreateClient()
+            .PostAsJsonAsync(Url("prometheus", policyId), Envelope(GroupKey), TestJson.Options);
+
+        // {format} names the shape and {source} names the integration. An operator who names their
+        // integration after the software still gets the parser they asked for in the URL, and an
+        // Alertmanager body reaching the generic parser is loudly wrong rather than half-read.
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await CountAsync<Alert>()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task IngestPrometheus_UnparseableEnvelope_Returns400AndOpensNothing()
+    {
+        var policyId = await SeedPolicyAsync(60);
+
+        var response = await IngestPrometheusAsync(policyId, new { version = "5", data = "who knows" });
+
+        // A 202 would tell Alertmanager the page was delivered and it would never resend, so a body
+        // Klaxon cannot read has to be refused rather than ignored. Ignored is for a valid envelope
+        // with nothing to do — never for one that was not understood.
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await CountAsync<Alert>()).Should().Be(0);
+        (await CountAsync<Escalation>()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Ingest_UnknownFormat_Returns404()
+    {
+        var policyId = await SeedPolicyAsync(60);
+
+        var response = await factory.CreateClient()
+            .PostAsJsonAsync(Url("nagios", policyId, format: "promethues"), Firing(Key), TestJson.Options);
+
+        // A mistyped format names a parser that does not exist, so it is the same 404 an unknown
+        // policy gets. Falling back to a default parser would hand someone else's shape to the wrong
+        // reader and turn a typo into a permanent silent non-page.
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await CountAsync<Alert>()).Should().Be(0);
+    }
+
     private static string Url(string source, Guid policyId, string format = "generic") =>
         $"/api/v1/alerts/ingest/{format}/{source}/{policyId}";
+
+    private const string GroupKey = """{}/{severity="critical"}:{alertname="HighCpu", instance="web-1"}""";
+
+    private static object Envelope(string groupKey, string status = "firing") => new
+    {
+        version = "4",
+        groupKey,
+        status,
+        receiver = "klaxon",
+        alerts = new[] { new { status, labels = new { alertname = "HighCpu" } } },
+    };
+
+    private async Task<HttpResponseMessage> IngestPrometheusAsync(Guid policyId, object body) =>
+        await factory.CreateClient()
+            .PostAsJsonAsync(Url("prometheus", policyId, format: "prometheus"), body, TestJson.Options);
 
     private static IngestAlertRequest Firing(string dedupKey) => new(
         dedupKey, AlertIngestStatus.Firing,
