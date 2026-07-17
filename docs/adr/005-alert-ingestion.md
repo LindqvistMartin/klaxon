@@ -2,7 +2,10 @@
 
 ## Status
 
-Accepted and implemented by the ingest endpoint.
+Accepted and implemented by the ingest endpoint. Amended when a second payload shape arrived: the
+route gained a `{format}` segment, and the claim below that `{source}` is where a parser gets
+selected was wrong — it contradicted this record's own Minus, which requires `{source}` to be named
+per integration. One segment could not do both jobs. ADR-006 carries that decision.
 
 ## Context
 
@@ -17,20 +20,22 @@ never sends that notification again.
 
 ### The ingest URL names the policy
 
-`POST /api/v1/alerts/ingest/{source}/{policyId}`. The URL an operator pastes into their
-monitoring system is the binding, so configuring an integration means generating a URL
+`POST /api/v1/alerts/ingest/{format}/{source}/{policyId}`. The URL an operator pastes into
+their monitoring system is the binding, so configuring an integration means generating a URL
 rather than editing a routing table. Nothing else in the schema connects an alert to a
 policy: an `Alert` carries a source, a dedup key and a payload; an `EscalationPolicy`
 belongs to a team and has no notion of what it answers for.
 
 This is the shape the category already uses: Grafana OnCall integrates at
-`/integrations/v1/{type}/{token}/`, and PagerDuty's Events API carries a `routing_key` that
-resolves to a service and its escalation policy. An unknown policy is a 404, because the
-path names a resource that does not exist.
+`/integrations/v1/{type}/{token}/` — a payload shape and an integration identity in separate
+segments, which is exactly what `{format}` and `{source}` are here — and PagerDuty's Events API
+carries a `routing_key` that resolves to a service and its escalation policy. An unknown policy is
+a 404, because the path names a resource that does not exist; so is an unknown format.
 
 `{source}` is not decoration: it is half of the `(Source, DedupKey)` dedup identity
-(ADR-004), so one system's keys cannot collide with another's. It is also where a payload
-parser gets selected once there is more than one shape to parse.
+(ADR-004), so one system's keys cannot collide with another's. Choosing the parser is a
+different job and `{format}` does it, because a parser needs a closed set of names and an
+identity needs an open one (ADR-006).
 
 **Rejected.** *Policy id in the request body* — works for a caller written against Klaxon
 and nothing else. *Routing rules matching alert labels to policies* — where a mature product
@@ -82,7 +87,9 @@ for it," which is exactly what 202 says.
   firing deduplicates onto the first team's open incident and pages nobody. Until an
   `Integration` owns the dedup scope, `{source}` is what keeps them apart, and it has to be
   distinct per integration rather than named after the software. `Alert` has no team column
-  to scope by, which is why this is the URL's problem today.
+  to scope by, which is why this is the URL's problem today. Keeping parser selection in
+  `{format}` is what leaves `{source}` free to be that distinct name — an operator can run
+  `prometheus/team-a-prom` and `prometheus/team-b-prom` against one parser (ADR-006).
 - Ingest does no admission control: no rate limit, no bounded concurrency. Under a storm the
   connection pool is the queue, and its overflow surfaces as a 5xx — which a source retries,
   so the alert survives and the latency does not.
