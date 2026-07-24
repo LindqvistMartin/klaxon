@@ -54,6 +54,8 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncLifetime
             cfg.AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["ConnectionStrings:Postgres"] = _pg.GetConnectionString(),
+                ["Ack:SigningKey"] = "integration-test-ack-signing-key-0123456789",
+                ["Ack:LinkBaseUrl"] = "http://localhost",
             });
         });
 
