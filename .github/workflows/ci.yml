@@ -10,6 +10,9 @@ jobs:
       # Satisfies Program.cs startup validation on the runner; the integration ApiFactory
       # replaces this with the Testcontainers connection string via ConfigureWebHost.
       ConnectionStrings__Postgres: "Host=placeholder;Database=placeholder;Username=placeholder;Password=placeholder"
+      # Same idea for the ack signing key: satisfies startup on the runner; the integration ApiFactory
+      # overrides it via ConfigureWebHost.
+      Ack__SigningKey: "ci-placeholder-ack-signing-key-0123456789"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4

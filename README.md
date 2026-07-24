@@ -7,9 +7,10 @@
 [![CI](https://github.com/LindqvistMartin/klaxon/actions/workflows/ci.yml/badge.svg)](https://github.com/LindqvistMartin/klaxon/actions)
 
 > **Status: early.** The domain model, persistence, CRUD API, the escalation engine
-> (durable claim-and-advance), outbox-backed delivery to a log channel, and webhook
-> alert ingestion have landed — an alert posted to the ingest endpoint opens an
-> escalation and pages its first level. Remote notification channels, payload parsers
+> (durable claim-and-advance), outbox-backed delivery to a log channel, webhook alert
+> ingestion, and ack-without-login via signed links have landed — an alert posted to
+> the ingest endpoint opens an escalation, pages its first level, and can be acked
+> straight from the link on the page. Remote notification channels, payload parsers
 > per source, and a web UI follow. Watch the commits.
 
 ## Why

@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json.Serialization;
 using Klaxon.Api.Endpoints;
 using Klaxon.Api.Errors;
@@ -21,6 +22,13 @@ try
 
     if (string.IsNullOrWhiteSpace(builder.Configuration.GetConnectionString("Postgres")))
         throw new InvalidOperationException("ConnectionStrings:Postgres is required.");
+
+    // An ack link is a bearer credential (ADR-007): a deployment without a key would sign links
+    // anyone could forge, so refuse to start rather than do that. 32 bytes is the HMAC-SHA256 block
+    // the codec signs with.
+    var ackSigningKey = builder.Configuration["Ack:SigningKey"];
+    if (string.IsNullOrWhiteSpace(ackSigningKey) || Encoding.UTF8.GetByteCount(ackSigningKey) < 32)
+        throw new InvalidOperationException("Ack:SigningKey is required and must be at least 32 bytes.");
 
     builder.Services.AddSerilog((services, configuration) => configuration
         .ReadFrom.Services(services)
@@ -94,6 +102,7 @@ try
     v1.MapScheduleOverrideEndpoints();
     v1.MapEscalationPolicyEndpoints();
     v1.MapAlertEndpoints();
+    v1.MapAckEndpoints();
 
     app.Run();
 }
